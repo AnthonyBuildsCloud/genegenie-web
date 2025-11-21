@@ -1,20 +1,23 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 
 type Entitlement = { isPaid: boolean; pkg: string };
 
 export default function UploadPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const pkgParam = searchParams.get("pkg");
-
   const [authorized, setAuthorized] = useState(false);
+  const [pkgParam, setPkgParam] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
 
+    // Read ?pkg=... from the URL
+    const params = new URLSearchParams(window.location.search);
+    setPkgParam(params.get("pkg"));
+
+    // Check entitlement in localStorage
     const raw = window.localStorage.getItem("entitlement");
     if (!raw) {
       router.replace("/");

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 
 const ALLOWED_PACKAGES = [
   "tease",
@@ -14,10 +14,13 @@ const ALLOWED_PACKAGES = [
 
 export default function SuccessPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
 
   useEffect(() => {
-    const pkg = searchParams.get("pkg");
+    // Only run in the browser
+    if (typeof window === "undefined") return;
+
+    const params = new URLSearchParams(window.location.search);
+    const pkg = params.get("pkg");
 
     if (!pkg || !ALLOWED_PACKAGES.includes(pkg as any)) {
       router.replace("/");
@@ -26,12 +29,9 @@ export default function SuccessPage() {
 
     const entitlement = { isPaid: true, pkg };
 
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem("entitlement", JSON.stringify(entitlement));
-    }
-
+    window.localStorage.setItem("entitlement", JSON.stringify(entitlement));
     router.replace(`/upload?pkg=${pkg}`);
-  }, [router, searchParams]);
+  }, [router]);
 
   return (
     <main className="min-h-screen flex items-center justify-center bg-black text-white">
