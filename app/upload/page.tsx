@@ -1,5 +1,6 @@
 "use client";
 
+import type React from "react";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -36,6 +37,46 @@ export default function UploadPage() {
     }
   }, [router]);
 
+  const handleSubmit = async (
+    e: React.FormEvent<HTMLFormElement>
+  ): Promise<void> => {
+    e.preventDefault();
+
+    const form = e.currentTarget;
+    const fileInput =
+      form.querySelector<HTMLInputElement>('input[type="file"]');
+
+    if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+      alert("Please choose a DNA file first.");
+      return;
+    }
+
+    const file = fileInput.files[0];
+
+    const formData = new FormData();
+    formData.append("file", file);
+    if (pkgParam) formData.append("pkg", pkgParam);
+
+    try {
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        alert("Something went wrong processing your DNA. Try again.");
+        return;
+      }
+
+      const data = await res.json();
+      console.log("Report data:", data);
+      alert("Fake report generated! (Next step: show this on a report page.)");
+    } catch (err) {
+      console.error(err);
+      alert("Network error talking to the server.");
+    }
+  };
+
   if (!authorized) {
     return (
       <main className="min-h-screen flex items-center justify-center bg-black text-white">
@@ -52,13 +93,7 @@ export default function UploadPage() {
           Package: <strong>{pkgParam ?? "unknown"}</strong>
         </p>
 
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            alert("Later this will send the file to your OpenAI DNA engine.");
-          }}
-          className="space-y-4"
-        >
+        <form onSubmit={handleSubmit} className="space-y-4">
           <input
             type="file"
             accept=".txt,.csv,.zip"
