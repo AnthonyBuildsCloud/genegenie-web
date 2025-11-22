@@ -64,15 +64,26 @@ export default function UploadPage() {
       });
 
       if (!res.ok) {
+        const text = await res.text();
+        console.error("Upload failed:", res.status, text);
         alert("Something went wrong processing your DNA. Try again.");
         return;
       }
 
       const data = await res.json();
       console.log("Report data:", data);
-      alert("Fake report generated! (Next step: show this on a report page.)");
+
+      if (data.report) {
+        alert(
+          "Here is a preview of your GeneGenie report:\n\n" +
+            String(data.report).slice(0, 400) +
+            "\n\n(Next step: show this on a dedicated report page.)"
+        );
+      } else {
+        alert("Upload succeeded, but no report text was returned.");
+      }
     } catch (err) {
-      console.error(err);
+      console.error("Network error:", err);
       alert("Network error talking to the server.");
     }
   };
