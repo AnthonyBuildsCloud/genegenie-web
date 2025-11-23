@@ -1,4 +1,3 @@
-
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 
@@ -14,18 +13,23 @@ export async function POST(req: NextRequest) {
     const file = formData.get("file");
     const pkg = (formData.get("pkg") || "tease").toString();
 
-    if (!(file instanceof File)) {
+    // Make sure we got a file we can read as text
+    if (!file || typeof (file as any).text !== "function") {
       return NextResponse.json(
         { error: "No file uploaded" },
         { status: 400 }
       );
     }
 
-    const dnaText = await file.text();
+    const dnaText = await (file as any).text();
 
-    const prompt = `
+    const systemPrompt = `
 You are "GeneGenie", a playful but smart DNA wellness interpreter.
+You speak in fun, friendly language, but you are very clear that this is NOT medical advice.
+Keep responses concise but flavorful. 
+`;
 
+    const userPrompt = `
 User has purchased the "${pkg}" package.
 
 They uploaded a small test DNA file. It contains one or more fake SNP lines like:
@@ -45,56 +49,34 @@ ${dnaText}
 -------------------
 `;
 
-    const response = await client.responses.create({
-      model: "gpt-5-mini",
-      input: prompt,
-      // you can add max_output_tokens here if you want, e.g. 600
+    // Use chat completions – simple, stable text output
+    const completion = await client.chat.completions.create({
+      model: "gpt-4.1-mini", // swap to a bigger model later if you want
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      max_tokens: 600,
     });
 
-    // ---- Robust text extraction from Responses API ----
-    const raw: any = response;
+    const reportText =
+      completion.choices[0]?.message?.content?.trim() ?? "";
 
-    // 1) Use output_text if the SDK gives it to us
-    let reportText: string =
-      (raw.output_text as string | undefined) ?? "";
-
-    // 2) Fallback: walk over output[].content[] and grab text/text.value
-    if (!reportText && Array.isArray(raw.output)) {
-      const chunks: string[] = [];
-
-      for (const item of raw.output) {
-        const content = item?.content ?? [];
-        for (const c of content) {
-          if (typeof c.text === "string") {
-            chunks.push(c.text);
-          } else if (c.text && typeof c.text.value === "string") {
-            chunks.push(c.text.value);
-          }
-        }
-      }
-
-      reportText = chunks.join("\n").trim();
-    }
-
-    // If we *still* can't find any text, send everything back for debugging
     if (!reportText) {
-      console.warn("Could not extract text from Responses API:", raw);
       return NextResponse.json(
         {
-          report: null,
-          raw: raw,
+          error: "Model did not return any text. Please try again.",
         },
-        { status: 200 }
+        { status: 500 }
       );
     }
 
-    // Normal success response
     return NextResponse.json(
       {
         report: reportText,
         meta: {
-          model: raw.model,
-          usage: raw.usage,
+          model: completion.model,
+          usage: completion.usage,
         },
       },
       { status: 200 }
