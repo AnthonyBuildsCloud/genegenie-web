@@ -49,23 +49,45 @@ ${dnaText}
 -------------------
 `;
 
-    // Use chat completions – simple, stable text output
+    // Use a stable chat model (gpt-4o-mini) with chat completions
     const completion = await client.chat.completions.create({
-      model: "gpt-5-mini", // swap to a bigger model later if you want
+      model: "gpt-4o-mini",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      max_tokens: 600,
+      max_completion_tokens: 600,
     });
 
-    const reportText =
-      completion.choices[0]?.message?.content?.trim() ?? "";
+    // Robustly pull out the text from the first choice
+    let reportText = "";
+
+    const choice = completion.choices[0];
+
+    if (choice?.message?.content) {
+      const content = choice.message.content as any;
+
+      if (typeof content === "string") {
+        reportText = content.trim();
+      } else if (Array.isArray(content)) {
+        reportText = content
+          .map((part: any) =>
+            typeof part === "string"
+              ? part
+              : typeof part?.text === "string"
+              ? part.text
+              : ""
+          )
+          .join("")
+          .trim();
+      }
+    }
 
     if (!reportText) {
       return NextResponse.json(
         {
           error: "Model did not return any text. Please try again.",
+          raw: completion,
         },
         { status: 500 }
       );
