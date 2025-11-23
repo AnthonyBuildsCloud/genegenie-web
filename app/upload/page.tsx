@@ -2,9 +2,8 @@
 
 import { FormEvent, useEffect, useState } from "react";
 
-
-
 export default function UploadPage() {
+  // Which package are we on? (tease, core, premium)
   const [pkg, setPkg] = useState("tease");
 
   useEffect(() => {
@@ -19,6 +18,14 @@ export default function UploadPage() {
   const [report, setReport] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Human-friendly name for the heading + label
+  const displayName =
+    pkg === "core"
+      ? "Wellness Core"
+      : pkg === "premium"
+      ? "Biohacker Pack"
+      : "DNA Tease";
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -75,7 +82,11 @@ export default function UploadPage() {
           Upload your DNA file
         </h1>
         <p className="text-sm text-neutral-400 mb-6 text-center">
-          Package: <span className="font-medium text-neutral-100">{pkg}</span>
+          Package:{" "}
+          <span className="font-medium text-neutral-100">
+            {displayName}{" "}
+            <span className="text-neutral-500 text-xs">({pkg})</span>
+          </span>
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -121,14 +132,16 @@ export default function UploadPage() {
                        disabled:opacity-60 disabled:cursor-not-allowed
                        transition-colors"
           >
-            {loading ? "Generating GeneGenie report..." : "Upload & Generate Report"}
+            {loading
+              ? "Generating GeneGenie report..."
+              : "Upload & Generate Report"}
           </button>
         </form>
 
         {report && (
           <div className="mt-6">
             <h2 className="text-lg font-semibold mb-2">
-              Your GeneGenie teaser report
+              Your GeneGenie {displayName} report
             </h2>
             <div className="text-sm text-neutral-100 bg-neutral-900/80 border border-neutral-800 rounded-lg p-4 max-h-80 overflow-y-auto whitespace-pre-line">
               {report}
