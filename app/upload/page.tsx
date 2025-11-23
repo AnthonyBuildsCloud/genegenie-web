@@ -1,122 +1,136 @@
 "use client";
 
-import type React from "react";
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-
-type Entitlement = { isPaid: boolean; pkg: string };
+import { FormEvent, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 export default function UploadPage() {
-  const router = useRouter();
-  const [authorized, setAuthorized] = useState(false);
-  const [pkgParam, setPkgParam] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  const pkg = searchParams.get("pkg") || "tease";
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
+  const [file, setFile] = useState<File | null>(null);
+  const [report, setReport] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-    // Read ?pkg=... from the URL
-    const params = new URLSearchParams(window.location.search);
-    setPkgParam(params.get("pkg"));
-
-    // Check entitlement in localStorage
-    const raw = window.localStorage.getItem("entitlement");
-    if (!raw) {
-      router.replace("/");
-      return;
-    }
-
-    try {
-      const parsed: Entitlement = JSON.parse(raw);
-      if (!parsed.isPaid) {
-        router.replace("/");
-        return;
-      }
-      setAuthorized(true);
-    } catch {
-      router.replace("/");
-    }
-  }, [router]);
-
-  const handleSubmit = async (
-    e: React.FormEvent<HTMLFormElement>
-  ): Promise<void> => {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    setError(null);
+    setReport(null);
 
-    const form = e.currentTarget;
-    const fileInput =
-      form.querySelector<HTMLInputElement>('input[type="file"]');
-
-    if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
-      alert("Please choose a DNA file first.");
+    if (!file) {
+      setError("Please choose a DNA file before uploading.");
       return;
     }
 
-    const file = fileInput.files[0];
-
-    const formData = new FormData();
-    formData.append("file", file);
-    if (pkgParam) formData.append("pkg", pkgParam);
-
     try {
+      setLoading(true);
+
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("pkg", pkg);
+
       const res = await fetch("/api/upload", {
         method: "POST",
         body: formData,
       });
 
+      const data = await res.json();
+
       if (!res.ok) {
-        const text = await res.text();
-        console.error("Upload failed:", res.status, text);
-        alert("Something went wrong processing your DNA. Try again.");
+        setError(
+          data?.error || "Something went wrong while generating your report."
+        );
         return;
       }
 
-      const data = await res.json();
-      console.log("Report data:", data);
-
-      if (data.report) {
-        alert(
-          "Here is a preview of your GeneGenie report:\n\n" +
-            String(data.report).slice(0, 400) +
-            "\n\n(Next step: show this on a dedicated report page.)"
+      if (!data.report) {
+        setError(
+          "We generated a response but couldn’t extract the text properly. Check the server logs."
         );
-      } else {
-        alert("Upload succeeded, but no report text was returned.");
+        console.warn("Raw model output:", data.raw);
+        return;
       }
-    } catch (err) {
-      console.error("Network error:", err);
-      alert("Network error talking to the server.");
-    }
-  };
 
-  if (!authorized) {
-    return (
-      <main className="min-h-screen flex items-center justify-center bg-black text-white">
-        <p>Checking your access…</p>
-      </main>
-    );
+      setReport(data.report as string);
+    } catch (err: any) {
+      console.error("Upload error:", err);
+      setError(err?.message || "Unexpected error. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-black text-white">
-      <div className="max-w-lg w-full p-6 space-y-4">
-        <h1 className="text-2xl font-bold mb-2">Upload your DNA file</h1>
-        <p className="text-sm text-gray-300">
-          Package: <strong>{pkgParam ?? "unknown"}</strong>
+    <main className="min-h-screen flex items-center justify-center bg-black text-white px-4">
+      <div className="max-w-xl w-full border border-neutral-800 rounded-2xl p-8 shadow-lg bg-neutral-950/80">
+        <h1 className="text-2xl font-semibold mb-2 text-center">
+          Upload your DNA file
+        </h1>
+        <p className="text-sm text-neutral-400 mb-6 text-center">
+          Package: <span className="font-medium text-neutral-100">{pkg}</span>
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <input
-            type="file"
-            accept=".txt,.csv,.zip"
-            className="block w-full text-sm text-white"
-          />
+          <div>
+            <label className="block text-sm font-medium mb-2">
+              Choose file
+            </label>
+            <input
+              type="file"
+              accept=".txt,.csv"
+              onChange={(e) => {
+                const f = e.target.files?.[0] || null;
+                setFile(f);
+                setReport(null);
+                setError(null);
+              }}
+              className="block w-full text-sm text-neutral-200
+                         file:mr-4 file:py-2 file:px-4
+                         file:rounded-md file:border-0
+                         file:text-sm file:font-semibold
+                         file:bg-neutral-800 file:text-neutral-100
+                         hover:file:bg-neutral-700"
+            />
+            {file && (
+              <p className="mt-1 text-xs text-neutral-500">
+                Selected: {file.name}
+              </p>
+            )}
+          </div>
+
+          {error && (
+            <div className="text-sm text-red-400 bg-red-950/40 border border-red-900 rounded-md px-3 py-2">
+              {error}
+            </div>
+          )}
+
           <button
             type="submit"
-            className="px-4 py-2 text-sm rounded-md border border-gray-500 font-medium"
+            disabled={loading}
+            className="w-full mt-2 inline-flex items-center justify-center px-4 py-2.5
+                       rounded-md text-sm font-medium
+                       bg-emerald-500 hover:bg-emerald-400
+                       disabled:opacity-60 disabled:cursor-not-allowed
+                       transition-colors"
           >
-            Upload &amp; Generate Report
+            {loading ? "Generating GeneGenie report..." : "Upload & Generate Report"}
           </button>
         </form>
+
+        {report && (
+          <div className="mt-6">
+            <h2 className="text-lg font-semibold mb-2">
+              Your GeneGenie teaser report
+            </h2>
+            <div className="text-sm text-neutral-100 bg-neutral-900/80 border border-neutral-800 rounded-lg p-4 max-h-80 overflow-y-auto whitespace-pre-line">
+              {report}
+            </div>
+            <p className="mt-2 text-[11px] text-neutral-500">
+              For entertainment and educational purposes only. Not medical
+              advice.
+            </p>
+          </div>
+        )}
       </div>
     </main>
   );
