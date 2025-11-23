@@ -2,15 +2,105 @@
 
 import { FormEvent, useEffect, useState } from "react";
 
+type RsidEntry = {
+  genotype: string;
+  rawLine: string | null;
+};
+
+// Union of all rsIDs used in panels on the server
+const PANEL_RSIDS = [
+  // Methylation / detox
+  "rs1801133", // MTHFR C677T
+  "rs1801131", // MTHFR A1298C
+  "rs4680",    // COMT Val158Met
+  "rs234706",  // MTRR
+  "rs1805087", // MTR
+
+  // Nutrition / weight
+  "rs9939609", // FTO
+  "rs1558902", // FTO appetite
+  "rs7903146", // TCF7L2
+  "rs17782313", // MC4R
+  "rs662799", // APOA5
+
+  // Fitness / performance
+  "rs1815739", // ACTN3
+  "rs1042713", // ADRB2
+  "rs1042714", // ADRB2
+  "rs4253778", // PPARGC1A
+
+  // Sleep / circadian
+  "rs1801260", // CLOCK
+  "rs5751876", // ADORA2A
+
+  // Dopamine / mood
+  "rs4685",   // COMT
+  "rs6269",   // COMT
+  "rs6323",   // MAOA
+
+  // Caffeine / stimulant
+  "rs762551", // CYP1A2
+
+  // Recovery / inflammation
+  "rs1800795", // IL6
+  "rs1143627", // IL1B
+  "rs2243250", // IL4
+];
+
+const RSID_SET = new Set(PANEL_RSIDS);
+
+function getDataLines(fullText: string): string[] {
+  const allLines = fullText.split(/\r?\n/);
+  return allLines.filter((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return false;
+    if (trimmed.startsWith("#")) return false;
+    if (!trimmed.includes("\t") && !trimmed.includes(",")) return false;
+    return true;
+  });
+}
+
+function buildClientRsidMap(dataLines: string[]): Record<string, RsidEntry> {
+  const map: Record<string, RsidEntry> = {};
+
+  for (const line of dataLines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    const parts = trimmed.split(/[\t,]/);
+    if (parts.length < 2) continue;
+
+    const rsid = parts[0].trim();
+    if (!RSID_SET.has(rsid)) continue;
+
+    let genotype = "";
+    if (parts.length >= 5) {
+      const a1 = parts[3]?.trim() ?? "";
+      const a2 = parts[4]?.trim() ?? "";
+      genotype = (a1 + a2).toUpperCase();
+    } else if (parts.length >= 4) {
+      genotype = (parts[3]?.trim() ?? "").toUpperCase();
+    } else {
+      genotype = parts[parts.length - 1]?.trim().toUpperCase();
+    }
+    if (!genotype) genotype = "UNKNOWN";
+
+    if (!map[rsid]) {
+      map[rsid] = { genotype, rawLine: trimmed };
+    }
+  }
+
+  return map;
+}
+
 export default function UploadPage() {
-  // Which package are we on? (tease, core, premium)
   const [pkg, setPkg] = useState("tease");
 
   useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       const value = params.get("pkg");
-      if (value) setPkg(value);
+      if (value) setPkg(value.toLowerCase());
     }
   }, []);
 
@@ -18,14 +108,6 @@ export default function UploadPage() {
   const [report, setReport] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-
-  // Human-friendly name for the heading + label
-  const displayName =
-    pkg === "core"
-      ? "Wellness Core"
-      : pkg === "premium"
-      ? "Biohacker Pack"
-      : "DNA Tease";
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -40,29 +122,63 @@ export default function UploadPage() {
     try {
       setLoading(true);
 
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("pkg", pkg);
+      // 1️⃣ Read the full DNA file in the browser
+      const fullText = await file.text();
+      const dataLines = getDataLines(fullText);
+      const totalCount = dataLines.length;
 
+      if (totalCount === 0) {
+        setError(
+          "We couldn't find any recognizable DNA lines in this file. Make sure it's the raw data export (e.g., AncestryDNA.txt)."
+        );
+        return;
+      }
+
+      // 2️⃣ Build a small rsid → genotype map for the SNPs we care about
+      const rsidMap = buildClientRsidMap(dataLines);
+
+      // 3️⃣ Take a small sample of lines for flavor / teaser text
+      const sampleLines = dataLines.slice(0, 80);
+
+      // 4️⃣ Send a small JSON payload instead of the whole file
       const res = await fetch("/api/upload", {
         method: "POST",
-        body: formData,
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          pkg,
+          sampleLines,
+          totalCount,
+          rsidMap,
+        }),
       });
 
-      const data = await res.json();
+      let rawText: string | null = null;
+      let data: any = null;
+
+      try {
+        rawText = await res.text();
+        data = rawText ? JSON.parse(rawText) : {};
+      } catch {
+        // Server returned non-JSON (e.g. HTML error)
+        setError(
+          rawText?.slice(0, 200) ||
+            "Server returned a non-JSON response. Please try again."
+        );
+        return;
+      }
 
       if (!res.ok) {
         setError(
-          data?.error || "Something went wrong while generating your report."
+          data?.error ||
+            "Something went wrong while generating your GeneGenie report."
         );
         return;
       }
 
       if (!data.report) {
-        setError(
-          "We generated a response but couldn’t extract the text properly. Check the server logs."
-        );
-        console.warn("Raw model output:", data.raw);
+        setError("Model did not return any text. Please try again.");
         return;
       }
 
@@ -84,8 +200,18 @@ export default function UploadPage() {
         <p className="text-sm text-neutral-400 mb-6 text-center">
           Package:{" "}
           <span className="font-medium text-neutral-100">
-            {displayName}{" "}
-            <span className="text-neutral-500 text-xs">({pkg})</span>
+            {pkg === "tease"
+              ? "DNA Tease (teaser)"
+              : pkg === "core"
+              ? "Wellness Core"
+              : pkg === "premium"
+              ? "Biohacker Pack"
+              : pkg === "ultimate"
+              ? "Life Plan Ultimate"
+              : pkg}
+          </span>{" "}
+          <span className="text-xs text-neutral-500">
+            ({pkg})
           </span>
         </p>
 
@@ -141,7 +267,9 @@ export default function UploadPage() {
         {report && (
           <div className="mt-6">
             <h2 className="text-lg font-semibold mb-2">
-              Your GeneGenie {displayName} report
+              {pkg === "tease"
+                ? "Your GeneGenie teaser report"
+                : "Your GeneGenie report"}
             </h2>
             <div className="text-sm text-neutral-100 bg-neutral-900/80 border border-neutral-800 rounded-lg p-4 max-h-80 overflow-y-auto whitespace-pre-line">
               {report}
