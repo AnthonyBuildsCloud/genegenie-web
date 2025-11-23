@@ -1,11 +1,19 @@
 "use client";
 
-import { FormEvent, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { FormEvent, useEffect, useState } from "react";
+
+
 
 export default function UploadPage() {
-  const searchParams = useSearchParams();
-  const pkg = searchParams.get("pkg") || "tease";
+  const [pkg, setPkg] = useState("tease");
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const value = params.get("pkg");
+      if (value) setPkg(value);
+    }
+  }, []);
 
   const [file, setFile] = useState<File | null>(null);
   const [report, setReport] = useState<string | null>(null);

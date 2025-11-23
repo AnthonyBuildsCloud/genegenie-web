@@ -51,7 +51,7 @@ ${dnaText}
 
     // Use chat completions – simple, stable text output
     const completion = await client.chat.completions.create({
-      model: "gpt-4.1-mini", // swap to a bigger model later if you want
+      model: "gpt-5-mini", // swap to a bigger model later if you want
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
