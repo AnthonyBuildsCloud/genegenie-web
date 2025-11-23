@@ -20,19 +20,29 @@ export default function HomePage() {
         </p>
 
         <div className="flex flex-col md:flex-row gap-4 mb-8">
-          <a
-            href="/upload?pkg=tease"
-            className="inline-flex items-center justify-center rounded-md px-5 py-3 text-sm font-semibold
-                       bg-emerald-500 text-black hover:bg-emerald-400 transition-colors w-full md:w-auto"
-          >
-            Try the free DNA teaser
-          </a>
+  <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
+    <a
+      href="/upload?pkg=tease"
+      className="inline-flex items-center justify-center rounded-md px-5 py-3 text-sm font-semibold
+                 bg-emerald-500 text-black hover:bg-emerald-400 transition-colors w-full md:w-auto"
+    >
+      Try the free DNA teaser
+    </a>
+    <a
+      href="/packages"
+      className="inline-flex items-center justify-center rounded-md px-5 py-3 text-sm font-semibold
+                 border border-neutral-700 text-neutral-100 hover:border-neutral-500 hover:bg-neutral-900
+                 transition-colors w-full md:w-auto"
+    >
+      View full packages
+    </a>
+  </div>
 
-          <div className="text-xs text-neutral-400 flex-1 md:self-center">
-            No signup required. Just upload a tiny sample file to see how
-            GeneGenie talks about your genetics.
-          </div>
-        </div>
+  <div className="text-xs text-neutral-400 flex-1 md:self-center">
+    No signup required for the teaser. When you&apos;re ready, upgrade to a deeper wellness or biohacker report.
+  </div>
+</div>
+
 
         <div className="grid gap-4 md:grid-cols-3 text-xs md:text-sm text-neutral-300">
           <div className="border border-neutral-800 rounded-xl p-3 bg-neutral-900/60">
