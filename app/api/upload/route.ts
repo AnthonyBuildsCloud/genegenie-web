@@ -161,7 +161,18 @@ const PACKAGE_PANELS: Record<string, PanelId[]> = {
   ],
 };
 
-// Build one panel section text block
+const BASE_SYSTEM_PROMPT = `You are "GeneGenie", a playful but smart DNA wellness interpreter.
+
+You:
+- Use fun, friendly, slightly nerdy language.
+- Are VERY clear that this is NOT medical advice, diagnosis, or treatment.
+- Avoid disease names, risk percentages, or prescriptive dosing.
+- Talk about "tendencies", "vibes", "experiments", and "things to be mindful of".
+- Encourage users to talk to qualified health professionals for real decisions.
+- Never invent genotypes or markers. If something is marked as "not found" or absent, treat it as unknown and say so clearly.
+- When helpful, connect dots between different sections (e.g. how sleep, caffeine, and dopamine style interact).
+- Use clear headings, bullet points, and occasional tables to make the report feel polished and "PDF ready".`;
+
 function buildPanelBlock(
   panel: PanelConfig,
   rsidMap: Record<string, RsidEntry>
@@ -171,11 +182,9 @@ function buildPanelBlock(
   lines.push(`Focus: ${panel.focus}`);
   lines.push("");
   lines.push("Key SNPs:");
-
   for (const rsid of panel.rsids) {
     const label = RSID_LABELS[rsid] ?? rsid;
     const found = rsidMap[rsid];
-
     if (found) {
       lines.push(`- ${rsid} (${label}): ${found.genotype}`);
     } else {
@@ -184,10 +193,327 @@ function buildPanelBlock(
       );
     }
   }
-
   lines.push("");
   return lines.join("\n");
 }
+
+function extractTextFromChoice(choice: any): string {
+  if (!choice?.message) return "";
+  const content = choice.message.content as any;
+  if (typeof content === "string") return content.trim();
+  if (Array.isArray(content)) {
+    return content
+      .map((part: any) =>
+        typeof part === "string"
+          ? part
+          : typeof part?.text === "string"
+          ? part.text
+          : ""
+      )
+      .join("")
+      .trim();
+  }
+  if (typeof content?.text === "string") return content.text.trim();
+  return "";
+}
+
+// -------- SECTIONED GENERATION FOR ULTIMATE (generic helper) -------- //
+
+async function generateUltimateSection(opts: {
+  sectionName: string;
+  heading: string;
+  instructions: string;
+  sharedContext: string;
+}): Promise<string> {
+  const { sectionName, heading, instructions, sharedContext } = opts;
+
+  try {
+    const completion = await client.chat.completions.create({
+      model: "gpt-4.1-mini",
+      max_tokens: 900,
+      messages: [
+        { role: "system", content: BASE_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: `${sharedContext}
+
+You are now writing ONLY the section called "${heading}" of a larger DNA wellness report.
+
+Section rules:
+- Start with the markdown heading "${heading}".
+- Stay focused on this section only; don't repeat other sections.
+- Follow these extra instructions for this section:
+${instructions}
+
+Write the full text for this one section now.`,
+        },
+      ],
+    });
+
+    const text = extractTextFromChoice(completion.choices[0]);
+    if (!text) {
+      return `${heading}\n(Content could not be generated.)\n`;
+    }
+    return text;
+  } catch (err) {
+    console.error(`Error generating section "${sectionName}":`, err);
+    return `${heading}\n(Content could not be generated due to a server error.)\n`;
+  }
+}
+
+// -------- ULTIMATE REPORT (already working) -------- //
+
+async function generateUltimateReport(
+  pkgRaw: string,
+  panelsText: string,
+  dnaSampleSection: string
+): Promise<string> {
+  const sharedContext = `User selected package: "${pkgRaw}" (Ultimate Life Plan).
+
+GENE PANELS FOR THIS PACKAGE:
+${panelsText}
+
+${dnaSampleSection}
+
+Remember: this is a premium, non-medical, entertainment/education DNA wellness report.`;
+
+  const sections: string[] = [];
+
+  // 1) Big Picture
+  sections.push(
+    await generateUltimateSection({
+      sectionName: "big_picture",
+      heading: "## Big Picture Summary",
+      sharedContext,
+      instructions: `- 3–5 sentences summarising the main themes across methylation, nutrition, fitness, sleep, dopamine, caffeine and recovery.
+- Mention that this is based on limited consumer DNA data and real-world feedback matters more.
+- Tone: premium but warm, not fluffy.`,
+    })
+  );
+
+  // 2) Methylation & Detox
+  sections.push(
+    await generateUltimateSection({
+      sectionName: "methylation",
+      heading: "## Methylation & Detox",
+      sharedContext,
+      instructions: `- Use rs1801133, rs1801131, rs4680, rs234706, rs1805087 IF present in the panel text.
+- Structure: short overview paragraph, bullet list referencing actual rsIDs & genotypes (only if present), then a "How to work with this" subheading with 4–7 practical, non-medical ideas.
+- Emphasise tendencies, not problems.`,
+    })
+  );
+
+  // 3) Nutrition & Weight
+  sections.push(
+    await generateUltimateSection({
+      sectionName: "nutrition",
+      heading: "## Nutrition & Weight Management",
+      sharedContext,
+      instructions: `- Use rs9939609, rs1558902, rs7903146, rs17782313, rs662799 where present.
+- Cover appetite, carb/fat response, easy-gainer vs hard-gainer vibes.
+- Include a "How to work with this" mini list with specific, experiment-style ideas.`,
+    })
+  );
+
+  // 4) Fitness, Performance & Recovery
+  sections.push(
+    await generateUltimateSection({
+      sectionName: "fitness",
+      heading: "## Fitness, Performance & Recovery",
+      sharedContext,
+      instructions: `- Use rs1815739, rs1042713, rs1042714, rs4253778, plus recovery/inflammation markers when present.
+- Talk about power vs endurance tendencies, adaptation to training loads, and general recovery style.
+- Add concrete training experiments (e.g. rep schemes, cardio styles) but no medical/rehab advice.`,
+    })
+  );
+
+  // 5) Sleep & Circadian
+  sections.push(
+    await generateUltimateSection({
+      sectionName: "sleep",
+      heading: "## Sleep & Circadian Rhythms",
+      sharedContext,
+      instructions: `- Use CLOCK / rs1801260 and any other sleep-related markers mentioned in the panels.
+- Cover morning vs evening preference and light habits.
+- Include a short list of practical sleep/lighting experiments.`,
+    })
+  );
+
+  // 6) Dopamine, Focus & Motivation
+  sections.push(
+    await generateUltimateSection({
+      sectionName: "dopamine",
+      heading: "## Dopamine, Focus & Motivation",
+      sharedContext,
+      instructions: `- Use COMT and MAOA markers from the panels when present.
+- Discuss motivation style, focus, reward sensitivity, and stress reactivity (non-clinical).
+- Finish with 4–7 experiment-style ideas for structuring work, breaks, and hobbies.`,
+    })
+  );
+
+  // 7) Caffeine & Stimulant Response
+  sections.push(
+    await generateUltimateSection({
+      sectionName: "caffeine",
+      heading: "## Caffeine & Stimulant Response",
+      sharedContext,
+      instructions: `- Use rs762551 and ADORA2A panel info if present.
+- Describe likely tendencies for caffeine metabolism and sleep sensitivity in playful, non-medical language.
+- Add a few sample experiments across morning / mid-day / no-late-afternoon caffeine.`,
+    })
+  );
+
+  // 8) Practical Lifestyle & Habit Ideas
+  sections.push(
+    await generateUltimateSection({
+      sectionName: "lifestyle",
+      heading: "## Practical Lifestyle & Habit Ideas",
+      sharedContext,
+      instructions: `- Pull everything together into a simple playbook: daily habits, weekly rhythms, and monthly check-ins.
+- Use bullet points and subheadings like "Daily Habits", "Weekly Experiments", "Quarterly Reflections".
+- Make it feel like a game plan the user can actually follow.
+- End the FINAL paragraph of this section with the exact sentence: "For entertainment and educational purposes only. This is not medical advice."`,
+    })
+  );
+
+  const title = "# The Ultimate Life Plan Report\n";
+  return [title, ...sections].join("\n\n");
+}
+
+// -------- NEW: PREMIUM / BIOHACKER MULTI-SECTION REPORT -------- //
+
+async function generatePremiumReport(
+  pkgRaw: string,
+  panelsText: string,
+  dnaSampleSection: string
+): Promise<string> {
+  const sharedContext = `User selected package: "${pkgRaw}" (Biohacker Pack / Premium).
+
+GENE PANELS FOR THIS PACKAGE:
+${panelsText}
+
+${dnaSampleSection}
+
+Remember: this is a non-medical, biohacker-style entertainment/education DNA wellness report aimed at lifters, gym rats, productivity nerds, and wellness hackers.`;
+
+  const sections: string[] = [];
+
+  // 1) High-Level Summary
+  sections.push(
+    await generateUltimateSection({
+      sectionName: "bio_high_level",
+      heading: "## 🚀 High-Level Summary",
+      sharedContext,
+      instructions: `- Provide a short table or bullet list summarising key genes/alleles and friendly takeaways.
+- Add 4–6 "Top themes" that capture training style, dopamine/focus style, nutrition tendencies, recovery vibe, caffeine rhythm, and circadian notes.
+- Tone: energetic, "biohacker newsletter" style, but still non-medical.`,
+    })
+  );
+
+  // 2) Training & Muscle Response
+  sections.push(
+    await generateUltimateSection({
+      sectionName: "bio_training",
+      heading: "## 🏋️ Training & Muscle Response",
+      sharedContext,
+      instructions: `- Use ACTN3, ADRB2, PPARGC1A and recovery markers where present.
+- Explain power vs endurance tendencies, adaptation to volume/intensity, and how fat-mobilisation / cardio style might feel.
+- Provide practical training guidance: base-building, power/speed blocks, rep ranges, and example weekly splits (no rehab/medical advice).`,
+    })
+  );
+
+  // 3) Dopamine & Focus
+  sections.push(
+    await generateUltimateSection({
+      sectionName: "bio_dopamine",
+      heading: "## ⚡ Dopamine & Focus: Your Motivation Circuitry",
+      sharedContext,
+      instructions: `- Use COMT and MAOA-related markers where present.
+- Describe motivation style, focus style, reward sensitivity, and stress reactivity in non-clinical language.
+- Include a bullet list of 4–7 experiment ideas for focus blocks, break timing, novelty, and habits that support your dopamine style.`,
+    })
+  );
+
+  // 4) Nutrition & Metabolism
+  sections.push(
+    await generateUltimateSection({
+      sectionName: "bio_nutrition",
+      heading: "## 🥑 Nutrition & Metabolism: Your Dietary Tune-Up",
+      sharedContext,
+      instructions: `- Use FTO, TCF7L2, MC4R, APOA5 and related markers when present.
+- Discuss appetite signalling, carb vs fat response, easy-gainer vs hard-gainer feel, and triglyceride / fat-handling tendencies.
+- Include either a small table or neat bullet list mapping genes to friendly meanings.
+- Finish with practical experiment ideas: carb timing, fat types, satiety strategies, and pre/post-workout fuel ideas.`,
+    })
+  );
+
+  // 5) Recovery & Inflammation
+  sections.push(
+    await generateUltimateSection({
+      sectionName: "bio_recovery",
+      heading: "## 🛌 Recovery & Inflammation: How You Bounce Back",
+      sharedContext,
+      instructions: `- Use IL6, IL1B, IL4 style markers where present as mild tendencies.
+- Describe soreness pattern, bounce-back time, and how hard sessions might feel.
+- Suggest non-medical biohacker tactics: deload weeks, active recovery, sleep, nutrition, and stress management experiments.`,
+    })
+  );
+
+  // 6) Caffeine & Stimulant Response
+  sections.push(
+    await generateUltimateSection({
+      sectionName: "bio_caffeine",
+      heading: "## ☕ Caffeine & Stimulant Response",
+      sharedContext,
+      instructions: `- Use CYP1A2 and ADORA2A panel info where present.
+- Describe likely tendencies for caffeine clearance and jitter/sleep sensitivity as playful tendencies.
+- Provide experiments: morning-only caffeine, micro-doses vs big doses, pre-workout timing, and stimulant-free days.`,
+    })
+  );
+
+  // 7) Circadian Rhythm, Light & Routines
+  sections.push(
+    await generateUltimateSection({
+      sectionName: "bio_circadian",
+      heading: "## 🌞 Circadian Rhythm, Light & Daily Routines",
+      sharedContext,
+      instructions: `- Use CLOCK and any related circadian markers present.
+- Discuss likely leaning toward morning or evening energy, and how light exposure and screen use might interact.
+- Give specific suggestions for light exposure, possible cold exposure timing (if appropriate), and anchor habits (wake time, meal timing, wind-down routines).`,
+    })
+  );
+
+  // 8) Epigenetic-Friendly Experiments
+  sections.push(
+    await generateUltimateSection({
+      sectionName: "bio_epigenetic",
+      heading: "## 🧬 Epigenetic-Friendly Experiments & Knobs to Tweak",
+      sharedContext,
+      instructions: `- Create a compact table or bullet list of experiment ideas grouped by area:
+  (Methylation & Detox, Training, Nutrition, Dopamine & Focus, Recovery, Caffeine, Circadian).
+- For each, give 1–2 sentences about why it might be fun or useful to try.
+- Emphasise experimentation, tracking, and listening to real-world feedback over genetic determinism.`,
+    })
+  );
+
+  // 9) 90-Day Biohacker Game Plan (with disclaimer)
+  sections.push(
+    await generateUltimateSection({
+      sectionName: "bio_90day",
+      heading: "## 🎯 90-Day Biohacker Game Plan",
+      sharedContext,
+      instructions: `- Turn all prior sections into a simple 90-day roadmap: Phase 1 (Weeks 1–4), Phase 2 (Weeks 5–8), Phase 3 (Weeks 9–12).
+- Include suggestions for what to focus on each phase (training tweaks, nutrition experiments, sleep/light changes, dopamine/focus habits).
+- Keep it non-medical and framed as optional experiments, not prescriptions.
+- END the final paragraph of this section with the exact sentence: "For entertainment and educational purposes only. This is not medical advice."`,
+    })
+  );
+
+  const title = "# Your Biohacker Pack DNA Deep-Dive\n";
+  return [title, ...sections].join("\n\n");
+}
+
+// -------- MAIN HANDLER -------- //
 
 export async function POST(req: NextRequest) {
   try {
@@ -195,18 +521,25 @@ export async function POST(req: NextRequest) {
 
     if (!body) {
       return NextResponse.json(
-        { error: "Invalid JSON body. Expected pkg, sampleLines, totalCount, rsidMap." },
+        {
+          error:
+            "Invalid JSON body. Expected pkg, sampleLines, totalCount, rsidMap.",
+        },
         { status: 400 }
       );
     }
 
     const pkgRaw = (body.pkg || "tease").toString();
     const pkg = pkgRaw.toLowerCase();
-    const sampleLines = Array.isArray(body.sampleLines) ? body.sampleLines : [];
-    const totalCount =
-      typeof body.totalCount === "number" ? body.totalCount : sampleLines.length;
-    const rsidMap: Record<string, RsidEntry> = body.rsidMap || {};
 
+    const sampleLines = Array.isArray(body.sampleLines)
+      ? (body.sampleLines as string[])
+      : [];
+    const totalCount =
+      typeof body.totalCount === "number"
+        ? (body.totalCount as number)
+        : sampleLines.length;
+    const rsidMap: Record<string, RsidEntry> = body.rsidMap || {};
     const sampleCount = sampleLines.length;
 
     const panelIdsForPkg = PACKAGE_PANELS[pkg] ?? [];
@@ -222,111 +555,95 @@ export async function POST(req: NextRequest) {
       panelSections = sections.join("\n");
     }
 
+    const panelsText =
+      panelSections ||
+      "(No gene panels were provided for this package; base your interpretation on the panel description only.)";
+
+    const dnaSampleSection =
+      sampleCount > 0
+        ? `DNA SAMPLE (first ${sampleCount} of ~${totalCount} data lines – just for flavor)
+-------------------
+${sampleLines.join("\n")}
+-------------------`
+        : "No sample lines were provided.";
+
+    // ---- Ultimate: multi-section generation to avoid truncation ----
+    if (pkg === "ultimate") {
+      const fullReport = await generateUltimateReport(
+        pkgRaw,
+        panelsText,
+        dnaSampleSection
+      );
+
+      return NextResponse.json(
+        {
+          report: fullReport,
+          meta: {
+            model: "gpt-4.1-mini",
+            pkg,
+            totalLines: totalCount,
+            panelsUsed: panelIdsForPkg,
+            mode: "multi-section-ultimate",
+          },
+        },
+        { status: 200 }
+      );
+    }
+
+    // ---- NEW: Premium/Biohacker: multi-section generation ----
+    if (pkg === "premium") {
+      const fullReport = await generatePremiumReport(
+        pkgRaw,
+        panelsText,
+        dnaSampleSection
+      );
+
+      return NextResponse.json(
+        {
+          report: fullReport,
+          meta: {
+            model: "gpt-4.1-mini",
+            pkg,
+            totalLines: totalCount,
+            panelsUsed: panelIdsForPkg,
+            mode: "multi-section-premium",
+          },
+        },
+        { status: 200 }
+      );
+    }
+
+    // ---- Other packages: single-shot generation (tease, core, fallback) ----
     let pkgDescription = "";
     let pkgInstructions = "";
 
     if (pkg === "tease") {
-      pkgDescription = `DNA Tease is a fun, social-friendly mini reading. It is NOT a serious wellness or medical report.`;
-
-      pkgInstructions = `
-- Tone: playful, witty, screenshot-ready.
-- Length: ~250–400 words.
-- Structure:
-  1) Short, punchy Summary (1–2 sentences).
-  2) "What your DNA sample hints at" – quirky personality / lifestyle vibes.
-  3) A few bullet points that feel shareable/fun.
-- DO NOT talk about serious health risks, disease, or anything heavy.
-- Make it clear this is based on a tiny subset of the file, just for fun.
-`;
+      pkgDescription =
+        "DNA Tease is a fun, social-friendly mini reading. It is NOT a serious wellness or medical report.";
+      pkgInstructions =
+        "- Tone: playful, witty, screenshot-ready.\n" +
+        "- Length: ~250–400 words.\n" +
+        '- Structure: 1) Short, punchy Summary. 2) Fun personality / lifestyle vibes. 3) A few shareable bullet points.\n' +
+        "- Do NOT talk about serious health risks or disease.\n" +
+        "- Make it clear this is based on a tiny subset of the file, just for fun.\n";
     } else if (pkg === "core") {
-      pkgDescription = `The Wellness Core report is a mid-level wellness blueprint. It should feel like a friendly, simple alternative to DNA wellness products — focused on general tendencies, not diagnoses.`;
-
-      pkgInstructions = `
-- Use the panel sections (methylation, nutrition, fitness_light, sleep_light) as your main anchor.
-- Length: ~700–1200 words.
-- Suggested structure:
-  1) Overview Summary – 2–3 sentences.
-  2) Methylation & Detox.
-  3) Nutrition & Weight Style.
-  4) Fitness & Recovery (light).
-  5) Sleep & Daily Rhythm (light).
-  6) Gentle lifestyle-style ideas (no prescriptions, no guarantees).
-- Explicitly state:
-  - This is entertainment/education.
-  - It is based on a limited consumer DNA upload and a small panel, not a clinical test.
-`;
-    } else if (pkg === "premium") {
-      pkgDescription = `The Biohacker Pack is aimed at gym rats, productivity geeks, and health-obsessed people who want more knobs to tweak. It builds on Wellness Core but goes deeper into performance and routine design.`;
-
-      pkgInstructions = `
-- Use all included panels as your backbone (methylation, nutrition, fitness_full, dopamine, caffeine, recovery, circadian).
-- Length: ~1200–2000 words.
-- Suggested structure:
-  1) High-level Summary – highlight this as an "optimization playground".
-  2) Training & Muscle Response (ACTN3 + related markers).
-  3) Dopamine, Focus & Drive (COMT + dopamine-related markers).
-  4) Nutrition & Metabolism tendencies.
-  5) Recovery, Inflammation & Hydration.
-  6) Caffeine & Stimulant Response (CYP1A2 etc.).
-  7) Circadian & Light / Cold Exposure.
-  8) Epigenetic-Friendly Levers & Experiments (clear, specific, gentle).
-  9) 90-Day Biohacker Game Plan (Phase 1–3).
-- Never promise outcomes, cure, or prevention. Always frame as experiments and tendencies.
-`;
-    } else if (pkg === "ultimate") {
-      pkgDescription = `The Ultimate / Life Plan report is your "compete with LifeDNA" tier. It should feel like a premium, multi-section blueprint covering methylation, nutrition, fitness, sleep, recovery and mood into one DNA-informed life strategy.`;
-
-      pkgInstructions = `
-- Use ALL panel sections (everything provided) as your core foundation.
-- Length: ~1800–2800 words (you can be more detailed).
-- Suggested structure:
-  1) Big Picture Summary – 3–5 sentences tying together main themes.
-  2) Methylation & Detox (MTHFR/COMT, etc.).
-  3) Nutrition & Weight Management.
-  4) Vitamins & Supplement-style insights (conceptual; no dosages).
-  5) Fitness, Performance & Recovery.
-  6) Sleep & Circadian Rhythms.
-  7) Dopamine, Focus, Motivation & Stress Style.
-  8) Caffeine & Stimulant Response.
-  9) Practical Lifestyle & Habit Ideas (organized in bullet lists).
-  10) 90-Day Life Plan – phased approach (Foundation, Optimization, Refinement).
-- Make it feel premium but still fun and accessible.
-- Constantly remind:
-  - This is NOT medical advice.
-  - It is based on a limited gene panel from a consumer DNA service, not a diagnostic lab.
-`;
+      pkgDescription =
+        "The Wellness Core report is a mid-level wellness blueprint. It should feel like a friendly, simple alternative to DNA wellness products — focused on general tendencies, not diagnoses.";
+      pkgInstructions =
+        "- Use methylation, nutrition, fitness_light, and sleep_light panels as the backbone.\n" +
+        "- Length: ~800–1300 words.\n" +
+        "- Structure: Overview, then sections for Methylation & Detox, Nutrition & Weight Style, Fitness & Recovery (light), Sleep & Daily Rhythm, and a short lifestyle ideas section.\n" +
+        "- Explicitly state that this is entertainment/education and based on limited consumer DNA data.\n";
     } else {
-      pkgDescription = `Unknown package. Treat it like a fun mini-report similar to DNA Tease.`;
-      pkgInstructions = `
-- Short, playful, clearly non-medical.
-- Mention that it's based on a limited sample of the DNA file.
-`;
+      // Any other / unknown package falls back to a playful mini-report
+      pkgDescription =
+        "Unknown package. Treat it like a short, playful mini-report similar to DNA Tease.";
+      pkgInstructions =
+        "- Short, playful, clearly non-medical.\n" +
+        "- Mention that it's based on a limited sample of the DNA file.\n";
     }
 
-    const systemPrompt = `
-You are "GeneGenie", a playful but smart DNA wellness interpreter.
-You:
-- Use fun, friendly, slightly nerdy language.
-- Are VERY clear that this is NOT medical advice, diagnosis, or treatment.
-- Avoid disease names, risk percentages, or prescriptive dosing.
-- Talk about "tendencies", "vibes", "experiments", and "things to be mindful of".
-- Encourage users to talk to qualified health professionals for real decisions.
-Use headings and bullet points when helpful.
-`;
-
-    const panelsText =
-      panelSections ||
-      "(No gene panels were provided for this package; base your interpretation on the sample description and DNA SAMPLE block only.)";
-
-    const dnaSampleSection = `
-DNA SAMPLE (first ${sampleCount} of ~${totalCount} data lines – just for flavor)
--------------------
-${sampleLines.join("\n")}
--------------------
-`;
-
-    const userPrompt = `
-User selected package: "${pkgRaw}".
+    const userPrompt = `User selected package: "${pkgRaw}". 
 
 PACKAGE DESCRIPTION:
 ${pkgDescription}
@@ -334,53 +651,32 @@ ${pkgDescription}
 PACKAGE-SPECIFIC INSTRUCTIONS:
 ${pkgInstructions}
 
-GENE PANELS FOR THIS PACKAGE (extracted by scanning the FULL DNA file on the client and sending key SNPs only):
+GENE PANELS FOR THIS PACKAGE:
 ${panelsText}
 
 ${dnaSampleSection}
 
 Your job:
 - Follow the package-specific instructions.
-- If gene panels are provided, use them as the primary anchor.
-- Do NOT invent genotypes; if something is marked as "not found", treat it as unknown.
-- Be playful and encouraging, but always remind the user that this is entertainment/education only.
-`;
+- Use the panel sections as the primary anchor.
+- Do NOT invent genotypes; if something is marked as "not found" or is absent, treat it as unknown.
+- Be playful and encouraging, but always remind the user that this is entertainment and education only, not medical advice.`;
 
     const completion = await client.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-4.1-mini",
+      max_tokens: 2000,
       messages: [
-        { role: "system", content: systemPrompt },
+        { role: "system", content: BASE_SYSTEM_PROMPT },
         { role: "user", content: userPrompt },
       ],
-      max_completion_tokens: 1200,
     });
 
-    let reportText = "";
-    const choice = completion.choices[0];
-
-    if (choice?.message?.content) {
-      const content = choice.message.content as any;
-      if (typeof content === "string") {
-        reportText = content.trim();
-      } else if (Array.isArray(content)) {
-        reportText = content
-          .map((part: any) =>
-            typeof part === "string"
-              ? part
-              : typeof part?.text === "string"
-              ? part.text
-              : ""
-          )
-          .join("")
-          .trim();
-      }
-    }
+    const reportText = extractTextFromChoice(completion.choices[0]);
 
     if (!reportText) {
       return NextResponse.json(
         {
           error: "Model did not return any text. Please try again.",
-          raw: completion,
         },
         { status: 500 }
       );
@@ -388,13 +684,13 @@ Your job:
 
     return NextResponse.json(
       {
-        report: reportText,
+        report: reportText.trim(),
         meta: {
-          model: completion.model,
-          usage: completion.usage,
+          model: "gpt-4.1-mini",
           pkg,
           totalLines: totalCount,
           panelsUsed: panelIdsForPkg,
+          mode: "single-shot",
         },
       },
       { status: 200 }

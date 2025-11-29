@@ -1,151 +1,108 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 type RsidEntry = {
   genotype: string;
   rawLine: string | null;
 };
 
-// Union of all rsIDs used in panels on the server
-const PANEL_RSIDS = [
-  // Methylation / detox
-  "rs1801133", // MTHFR C677T
-  "rs1801131", // MTHFR A1298C
-  "rs4680",    // COMT Val158Met
-  "rs234706",  // MTRR
-  "rs1805087", // MTR
+type ParsedDNA = {
+  sampleLines: string[];
+  totalCount: number;
+  rsidMap: Record<string, RsidEntry>;
+};
 
-  // Nutrition / weight
-  "rs9939609", // FTO
-  "rs1558902", // FTO appetite
-  "rs7903146", // TCF7L2
-  "rs17782313", // MC4R
-  "rs662799", // APOA5
+function parseDnaText(text: string): ParsedDNA {
+  const lines = text.split(/\r?\n/);
 
-  // Fitness / performance
-  "rs1815739", // ACTN3
-  "rs1042713", // ADRB2
-  "rs1042714", // ADRB2
-  "rs4253778", // PPARGC1A
+  // Keep a small sample of the raw lines for flavor in the prompt
+  const sampleLines: string[] = [];
+  for (const line of lines) {
+    if (!line.trim() || line.startsWith("#")) continue;
+    sampleLines.push(line);
+    if (sampleLines.length >= 25) break;
+  }
 
-  // Sleep / circadian
-  "rs1801260", // CLOCK
-  "rs5751876", // ADORA2A
+  // Find header line (Ancestry / 23andMe style)
+  const headerIndex = lines.findIndex((l) =>
+    l.toLowerCase().startsWith("rsid")
+  );
 
-  // Dopamine / mood
-  "rs4685",   // COMT
-  "rs6269",   // COMT
-  "rs6323",   // MAOA
+  const rsidMap: Record<string, RsidEntry> = {};
+  let totalCount = 0;
 
-  // Caffeine / stimulant
-  "rs762551", // CYP1A2
+  if (headerIndex >= 0) {
+    for (let i = headerIndex + 1; i < lines.length; i++) {
+      const raw = lines[i].trim();
+      if (!raw) continue;
+      if (raw.startsWith("#")) continue;
 
-  // Recovery / inflammation
-  "rs1800795", // IL6
-  "rs1143627", // IL1B
-  "rs2243250", // IL4
-];
+      const parts = raw.split(/\s+|\t/);
+      if (parts.length < 4) continue;
 
-const RSID_SET = new Set(PANEL_RSIDS);
+      const rsid = parts[0];
+      const genotype = parts[3] || parts[2] || "";
 
-function getDataLines(fullText: string): string[] {
-  const allLines = fullText.split(/\r?\n/);
-  return allLines.filter((line) => {
-    const trimmed = line.trim();
-    if (!trimmed) return false;
-    if (trimmed.startsWith("#")) return false;
-    if (!trimmed.includes("\t") && !trimmed.includes(",")) return false;
-    return true;
-  });
-}
+      if (!rsid || !genotype) continue;
 
-function buildClientRsidMap(dataLines: string[]): Record<string, RsidEntry> {
-  const map: Record<string, RsidEntry> = {};
-
-  for (const line of dataLines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-
-    const parts = trimmed.split(/[\t,]/);
-    if (parts.length < 2) continue;
-
-    const rsid = parts[0].trim();
-    if (!RSID_SET.has(rsid)) continue;
-
-    let genotype = "";
-    if (parts.length >= 5) {
-      const a1 = parts[3]?.trim() ?? "";
-      const a2 = parts[4]?.trim() ?? "";
-      genotype = (a1 + a2).toUpperCase();
-    } else if (parts.length >= 4) {
-      genotype = (parts[3]?.trim() ?? "").toUpperCase();
-    } else {
-      genotype = parts[parts.length - 1]?.trim().toUpperCase();
-    }
-    if (!genotype) genotype = "UNKNOWN";
-
-    if (!map[rsid]) {
-      map[rsid] = { genotype, rawLine: trimmed };
+      rsidMap[rsid] = {
+        genotype,
+        rawLine: raw,
+      };
+      totalCount++;
     }
   }
 
-  return map;
+  if (totalCount === 0) {
+    // Fallback: count non-comment lines
+    totalCount = lines.filter(
+      (l) => l.trim() && !l.startsWith("#")
+    ).length;
+  }
+
+  return { sampleLines, totalCount, rsidMap };
 }
 
 export default function UploadPage() {
-  const [pkg, setPkg] = useState("tease");
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      const value = params.get("pkg");
-      if (value) setPkg(value.toLowerCase());
-    }
-  }, []);
+  const searchParams = useSearchParams();
+  const pkg = (searchParams.get("pkg") || "tease").toLowerCase();
 
   const [file, setFile] = useState<File | null>(null);
-  const [report, setReport] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [fileName, setFileName] = useState<string>("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [report, setReport] = useState<string>("");
+  const [error, setError] = useState<string>("");
 
-  async function handleSubmit(e: FormEvent) {
+  const prettyPkgLabel =
+    pkg === "ultimate"
+      ? "Life Plan Ultimate"
+      : pkg === "premium"
+      ? "Biohacker Pack"
+      : pkg === "core"
+      ? "Wellness Core"
+      : "DNA Tease";
+
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
-    setReport(null);
+    setError("");
+    setReport("");
 
     if (!file) {
-      setError("Please choose a DNA file before uploading.");
+      setError("Please choose a DNA file first.");
       return;
     }
 
     try {
-      setLoading(true);
+      setIsLoading(true);
 
-      // 1️⃣ Read the full DNA file in the browser
-      const fullText = await file.text();
-      const dataLines = getDataLines(fullText);
-      const totalCount = dataLines.length;
+      const text = await file.text();
+      const { sampleLines, totalCount, rsidMap } = parseDnaText(text);
 
-      if (totalCount === 0) {
-        setError(
-          "We couldn't find any recognizable DNA lines in this file. Make sure it's the raw data export (e.g., AncestryDNA.txt)."
-        );
-        return;
-      }
-
-      // 2️⃣ Build a small rsid → genotype map for the SNPs we care about
-      const rsidMap = buildClientRsidMap(dataLines);
-
-      // 3️⃣ Take a small sample of lines for flavor / teaser text
-      const sampleLines = dataLines.slice(0, 80);
-
-      // 4️⃣ Send a small JSON payload instead of the whole file
       const res = await fetch("/api/upload", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           pkg,
           sampleLines,
@@ -154,133 +111,116 @@ export default function UploadPage() {
         }),
       });
 
-      let rawText: string | null = null;
-      let data: any = null;
-
-      try {
-        rawText = await res.text();
-        data = rawText ? JSON.parse(rawText) : {};
-      } catch {
-        // Server returned non-JSON (e.g. HTML error)
-        setError(
-          rawText?.slice(0, 200) ||
-            "Server returned a non-JSON response. Please try again."
-        );
-        return;
-      }
-
       if (!res.ok) {
+        const data = await res.json().catch(() => null);
         setError(
           data?.error ||
-            "Something went wrong while generating your GeneGenie report."
+            `Server error (${res.status}). Please try again.`
         );
         return;
       }
 
-      if (!data.report) {
-        setError("Model did not return any text. Please try again.");
-        return;
+      const data = await res.json();
+      if (data?.report) {
+        // IMPORTANT: no .slice(), no truncation here
+        setReport(data.report as string);
+      } else {
+        setError("No report text was returned from the server.");
       }
-
-      setReport(data.report as string);
     } catch (err: any) {
       console.error("Upload error:", err);
-      setError(err?.message || "Unexpected error. Please try again.");
+      setError(
+        err?.message || "Unexpected error while generating the report."
+      );
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   }
 
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0] || null;
+    setFile(f);
+    setReport("");
+    setError("");
+    setFileName(f ? f.name : "");
+  }
+
   return (
-    <main className="min-h-screen flex items-center justify-center bg-black text-white px-4">
-      <div className="max-w-xl w-full border border-neutral-800 rounded-2xl p-8 shadow-lg bg-neutral-950/80">
-        <h1 className="text-2xl font-semibold mb-2 text-center">
+    <div className="min-h-screen bg-black text-white flex flex-col items-center py-10 px-4">
+      <div className="w-full max-w-3xl bg-[#050505] border border-gray-800 rounded-2xl shadow-xl p-8">
+        <h1 className="text-3xl font-semibold text-center mb-2">
           Upload your DNA file
         </h1>
-        <p className="text-sm text-neutral-400 mb-6 text-center">
+        <p className="text-center text-sm text-gray-300 mb-6">
           Package:{" "}
-          <span className="font-medium text-neutral-100">
-            {pkg === "tease"
-              ? "DNA Tease (teaser)"
-              : pkg === "core"
-              ? "Wellness Core"
-              : pkg === "premium"
-              ? "Biohacker Pack"
-              : pkg === "ultimate"
-              ? "Life Plan Ultimate"
-              : pkg}
+          <span className="font-semibold">
+            {prettyPkgLabel}
           </span>{" "}
-          <span className="text-xs text-neutral-500">
+          <span className="text-xs text-gray-400">
             ({pkg})
           </span>
         </p>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-6">
           <div>
             <label className="block text-sm font-medium mb-2">
-              Choose file
+              Choose raw DNA file
             </label>
-            <input
-              type="file"
-              accept=".txt,.csv"
-              onChange={(e) => {
-                const f = e.target.files?.[0] || null;
-                setFile(f);
-                setReport(null);
-                setError(null);
-              }}
-              className="block w-full text-sm text-neutral-200
-                         file:mr-4 file:py-2 file:px-4
-                         file:rounded-md file:border-0
-                         file:text-sm file:font-semibold
-                         file:bg-neutral-800 file:text-neutral-100
-                         hover:file:bg-neutral-700"
-            />
-            {file && (
-              <p className="mt-1 text-xs text-neutral-500">
-                Selected: {file.name}
-              </p>
-            )}
-          </div>
-
-          {error && (
-            <div className="text-sm text-red-400 bg-red-950/40 border border-red-900 rounded-md px-3 py-2">
-              {error}
+            <div className="flex items-center gap-4">
+              <label className="inline-flex items-center px-4 py-2 bg-gray-100 text-black rounded-md cursor-pointer hover:bg-gray-200 text-sm font-medium">
+                <span>Choose File</span>
+                <input
+                  type="file"
+                  accept=".txt,.csv"
+                  className="hidden"
+                  onChange={handleFileChange}
+                />
+              </label>
+              <span className="text-sm text-gray-300">
+                {fileName || "No file chosen"}
+              </span>
             </div>
-          )}
+            <p className="mt-2 text-xs text-gray-500">
+              Supported: raw DNA text files from Ancestry, 23andMe and
+              similar services.
+            </p>
+          </div>
 
           <button
             type="submit"
-            disabled={loading}
-            className="w-full mt-2 inline-flex items-center justify-center px-4 py-2.5
-                       rounded-md text-sm font-medium
-                       bg-emerald-500 hover:bg-emerald-400
-                       disabled:opacity-60 disabled:cursor-not-allowed
-                       transition-colors"
+            disabled={!file || isLoading}
+            className="w-full py-3 rounded-md text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors"
           >
-            {loading
-              ? "Generating GeneGenie report..."
-              : "Upload & Generate Report"}
+            {isLoading ? "Generating report..." : "Upload & Generate Report"}
           </button>
         </form>
 
+        {error && (
+          <div className="mt-6 text-sm text-red-400 border border-red-500/50 rounded-md p-3 bg-red-500/5">
+            {error}
+          </div>
+        )}
+
         {report && (
-          <div className="mt-6">
-            <h2 className="text-lg font-semibold mb-2">
-              {pkg === "tease"
-                ? "Your GeneGenie teaser report"
-                : "Your GeneGenie report"}
+          <div className="mt-8">
+            <h2 className="text-xl font-semibold mb-3">
+              Your GeneGenie report
             </h2>
-            <div className="text-sm text-neutral-100 bg-neutral-900/80 border border-neutral-800 rounded-lg p-4 max-h-80 overflow-y-auto whitespace-pre-line">
-              {report}
+            <div className="bg-[#0b0b0b] border border-gray-800 rounded-xl p-4">
+              {/* NO maxLength, NO slicing, full text */}
+              <textarea
+                readOnly
+                value={report}
+                className="w-full h-96 bg-transparent text-sm text-gray-100 resize-vertical whitespace-pre-wrap"
+              />
+              <p className="mt-2 text-[11px] text-gray-500">
+                For entertainment and educational purposes only. Not
+                medical advice.
+              </p>
             </div>
-            <p className="mt-2 text-[11px] text-neutral-500">
-              For entertainment and educational purposes only. Not medical
-              advice.
-            </p>
           </div>
         )}
       </div>
-    </main>
+    </div>
   );
 }
